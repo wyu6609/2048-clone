@@ -179,15 +179,21 @@ body {
   align-items: center;
   font-weight: 700;
   border-radius: var(--tile-radius);
-  transition: transform 0.12s ease-in-out, background-color 0.1s;
+  transition: transform 0.12s ease-in-out;
   transform: translate(
     calc(var(--col) * (var(--tile-size) + var(--tile-gap))),
     calc(var(--row) * (var(--tile-size) + var(--tile-gap)))
   );
+  z-index: 10;
 }
 
-.tile-filled {
-  animation: pop 0.15s ease-out;
+.tile-new {
+  animation: tile-appear 0.2s ease-out;
+}
+
+.tile-merged {
+  animation: tile-pop 0.2s ease-out;
+  z-index: 20;
 }
 
 .tile-super {
@@ -196,18 +202,35 @@ body {
   box-shadow: 0 0 30px 10px rgba(243, 215, 116, 0.4);
 }
 
-@keyframes pop {
+@keyframes tile-appear {
+  0% {
+    opacity: 0;
+    transform: translate(
+      calc(var(--col) * (var(--tile-size) + var(--tile-gap))),
+      calc(var(--row) * (var(--tile-size) + var(--tile-gap)))
+    ) scale(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(
+      calc(var(--col) * (var(--tile-size) + var(--tile-gap))),
+      calc(var(--row) * (var(--tile-size) + var(--tile-gap)))
+    ) scale(1);
+  }
+}
+
+@keyframes tile-pop {
   0% {
     transform: translate(
       calc(var(--col) * (var(--tile-size) + var(--tile-gap))),
       calc(var(--row) * (var(--tile-size) + var(--tile-gap)))
-    ) scale(0.8);
+    ) scale(1);
   }
   50% {
     transform: translate(
       calc(var(--col) * (var(--tile-size) + var(--tile-gap))),
       calc(var(--row) * (var(--tile-size) + var(--tile-gap)))
-    ) scale(1.05);
+    ) scale(1.15);
   }
   100% {
     transform: translate(
@@ -229,6 +252,7 @@ body {
   align-items: center;
   border-radius: 8px;
   animation: fadeIn 0.3s ease-out;
+  z-index: 100;
 }
 
 .game-over-overlay {

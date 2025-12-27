@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import {
-  Grid,
+  Tile,
   Direction,
-  initializeGrid,
+  initializeTiles,
   move,
   spawnTile,
   hasWon,
@@ -10,18 +10,19 @@ import {
   getTileColor,
   getTileTextColor,
   getTileFontSize,
+  cloneTiles,
 } from '@/lib/game2048';
 import { useSound } from '@/hooks/useSound';
 import { Volume2, VolumeX, RotateCcw, Undo2 } from 'lucide-react';
 
 interface GameState {
-  grid: Grid;
+  tiles: Tile[];
   score: number;
   bestScore: number;
   gameOver: boolean;
   won: boolean;
   keepPlaying: boolean;
-  previousState: { grid: Grid; score: number } | null;
+  previousState: { tiles: Tile[]; score: number } | null;
 }
 
 function loadBestScore(): number {
@@ -35,7 +36,7 @@ function saveBestScore(score: number): void {
 
 export function Game2048() {
   const [gameState, setGameState] = useState<GameState>(() => ({
-    grid: initializeGrid(),
+    tiles: initializeTiles(),
     score: 0,
     bestScore: loadBestScore(),
     gameOver: false,
@@ -46,25 +47,35 @@ export function Game2048() {
 
   const { isMuted, toggleMute, playMove, playMerge, playWin, playGameOver } = useSound();
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
-  const gameContainerRef = useRef<HTMLDivElement>(null);
+  const isAnimatingRef = useRef(false);
+  const spawnTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const moveVersionRef = useRef(0);
+
+  const clearPendingSpawn = useCallback(() => {
+    if (spawnTimeoutRef.current) {
+      clearTimeout(spawnTimeoutRef.current);
+      spawnTimeoutRef.current = null;
+    }
+    moveVersionRef.current++;
+    isAnimatingRef.current = false;
+  }, []);
 
   const handleMove = useCallback((direction: Direction) => {
+    if (isAnimatingRef.current) return;
+    
     setGameState(prev => {
       if (prev.gameOver || (prev.won && !prev.keepPlaying)) return prev;
 
-      const result = move(prev.grid, direction);
+      const result = move(prev.tiles, direction);
       if (!result.moved) return prev;
 
-      const newGrid = spawnTile(result.grid);
-      const newScore = prev.score + result.score;
-      const newBestScore = Math.max(newScore, prev.bestScore);
+      isAnimatingRef.current = true;
+      const currentVersion = ++moveVersionRef.current;
       
+      const newBestScore = Math.max(prev.score + result.score, prev.bestScore);
       if (newBestScore > prev.bestScore) {
         saveBestScore(newBestScore);
       }
-
-      const won = !prev.won && !prev.keepPlaying && hasWon(newGrid);
-      const gameOver = !canMove(newGrid);
 
       if (result.merged) {
         playMerge();
@@ -72,27 +83,48 @@ export function Game2048() {
         playMove();
       }
 
-      if (won) {
-        setTimeout(() => playWin(), 100);
-      } else if (gameOver) {
-        setTimeout(() => playGameOver(), 100);
-      }
+      spawnTimeoutRef.current = setTimeout(() => {
+        if (moveVersionRef.current !== currentVersion) return;
+        
+        setGameState(current => {
+          const tilesWithNew = spawnTile(current.tiles);
+          const won = !current.won && !current.keepPlaying && hasWon(tilesWithNew);
+          const gameOver = !canMove(tilesWithNew);
+
+          if (won) {
+            setTimeout(() => playWin(), 50);
+          } else if (gameOver) {
+            setTimeout(() => playGameOver(), 50);
+          }
+
+          isAnimatingRef.current = false;
+          spawnTimeoutRef.current = null;
+
+          return {
+            ...current,
+            tiles: tilesWithNew,
+            gameOver,
+            won,
+          };
+        });
+      }, 120);
 
       return {
-        grid: newGrid,
-        score: newScore,
+        tiles: result.tiles,
+        score: prev.score + result.score,
         bestScore: newBestScore,
-        gameOver,
-        won,
+        gameOver: false,
+        won: prev.won,
         keepPlaying: prev.keepPlaying,
-        previousState: { grid: prev.grid, score: prev.score },
+        previousState: { tiles: cloneTiles(prev.tiles), score: prev.score },
       };
     });
   }, [playMove, playMerge, playWin, playGameOver]);
 
   const handleNewGame = useCallback(() => {
+    clearPendingSpawn();
     setGameState(prev => ({
-      grid: initializeGrid(),
+      tiles: initializeTiles(),
       score: 0,
       bestScore: prev.bestScore,
       gameOver: false,
@@ -100,21 +132,22 @@ export function Game2048() {
       keepPlaying: false,
       previousState: null,
     }));
-  }, []);
+  }, [clearPendingSpawn]);
 
   const handleUndo = useCallback(() => {
+    clearPendingSpawn();
     setGameState(prev => {
       if (!prev.previousState) return prev;
       return {
         ...prev,
-        grid: prev.previousState.grid,
+        tiles: prev.previousState.tiles,
         score: prev.previousState.score,
         gameOver: false,
         won: false,
         previousState: null,
       };
     });
-  }, []);
+  }, [clearPendingSpawn]);
 
   const handleKeepPlaying = useCallback(() => {
     setGameState(prev => ({
@@ -181,7 +214,6 @@ export function Game2048() {
   return (
     <div 
       className="game-container"
-      ref={gameContainerRef}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
@@ -225,23 +257,21 @@ export function Game2048() {
           ))}
         </div>
         <div className="tiles-container">
-          {gameState.grid.map((row, rowIndex) =>
-            row.map((value, colIndex) => (
-              <div
-                key={`${rowIndex}-${colIndex}`}
-                className={`tile ${value ? 'tile-filled' : ''} ${value && value >= 2048 ? 'tile-super' : ''}`}
-                style={{
-                  '--row': rowIndex,
-                  '--col': colIndex,
-                  backgroundColor: getTileColor(value),
-                  color: getTileTextColor(value),
-                  fontSize: getTileFontSize(value),
-                } as React.CSSProperties}
-              >
-                {value}
-              </div>
-            ))
-          )}
+          {gameState.tiles.map((tile) => (
+            <div
+              key={tile.id}
+              className={`tile ${tile.isNew ? 'tile-new' : ''} ${tile.isMerged ? 'tile-merged' : ''} ${tile.value >= 2048 ? 'tile-super' : ''}`}
+              style={{
+                '--row': tile.row,
+                '--col': tile.col,
+                backgroundColor: getTileColor(tile.value),
+                color: getTileTextColor(tile.value),
+                fontSize: getTileFontSize(tile.value),
+              } as React.CSSProperties}
+            >
+              {tile.value}
+            </div>
+          ))}
         </div>
 
         {gameState.won && !gameState.keepPlaying && (
